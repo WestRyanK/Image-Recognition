@@ -8,6 +8,20 @@ from sklearn import svm
 from sklearn.cluster import KMeans
 from collections import Counter
 
+%matplotlib inline
+np.set_printoptions(suppress=True)
+matplotlib.rcParams['figure.figsize'] = (4,4)
+
+def plot2d(image, title="", max=None, min=0, cmap="gray"):
+    plt.title(title)
+    if max == None:
+        plt.imshow(image, cmap=cmap, interpolation="none")
+    else:
+        plt.imshow(image, cmap=cmap, interpolation="none", vmin = min, vmax = max)
+    plt.show()
+
+
+
 class Recognizer:
     def __init__(self, categories_images, samples_per_image_count, vocab_size, max_images_per_category=25,  verbose=False):
         self.SIFT_DIM = 128
@@ -25,14 +39,16 @@ class Recognizer:
 
         self.vocab = self.__build_vocab(vocab_images)
         self.__alert("building vocab KD Tree...")
+# I build a KDTree with the vocabulary words here 
+# in order to quickly find which vocabulary word is closest for a feature
         self.vocab_kd_tree = spatial.KDTree(self.vocab)
 
+        start_time = time.time()
         self.categories_bags = self.__get_categories_bags(categories_images)
-#         self.__alert("building category KD Tree...")
-#         cb = map(lambda b: b[1], self.categories_bags)
-#         self.categories_bags_kd_tree = spatial.KDTree(cb)
+        elapsed = time.time() - start_time 
+        self.__alert("creating bags for all training images took " + str(elapsed) + " seconds")
 
-        self.__train(self.categories_bags)
+        self.train(self.categories_bags)
 
     def __limit_images_in_category(self, categories_images):
         cat_imgs = []
@@ -66,6 +82,8 @@ class Recognizer:
         self.__alert("sampling descriptors...")
         descriptors_matrix  = self.__sample_descriptors(descriptor_list)
     
+# Here I am clustering with KMeans to form a vocabulary using
+# a sample of the SIFT descriptors from each training image
         self.__alert("clustering with K Means.\nThis may take a while...")
         start_time = time.time()
         k_means = KMeans(n_clusters=self.vocab_size)
@@ -81,33 +99,17 @@ class Recognizer:
         
         descriptor_sample_size = min(self.samples_per_image_count * 3, len(descriptors))
         for descriptor in descriptors[:descriptor_sample_size]:
-            words = self.vocab[self.vocab_kd_tree.query(descriptor,3)[1]]
-#             for word in words:
-# #                 np.linalg.norm(descriptor - word)
-#                 words_list.append(word)
 
             word = self.vocab[self.vocab_kd_tree.query(descriptor,1)[1]]
             words_list.append(word)
         return words_list
         
     def __find_features(self, images):
-#         kps = []
         descs = []
         self.__alert("finding features...")
-#         if self.verbose:
-#             cv2.namedWindow("keypoints")
         for image in images:
-#             keypoints, descriptors = self.sift.detectAndCompute(image, None)
             _, descriptors = self.sift.detectAndCompute(image, None)
-#             kps.append(keypoints)
             descs.append(descriptors)
-#             if self.verbose:
-#                 im = cv2.drawKeypoints(image, keypoints, image, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-#                 cv2.namedWindow
-#                 cv2.imshow("keypoints", im)
-#                 cv2.waitKey(200)
-#         if self.verbose:
-#             cv2.destroyWindow("keypoints")
 
         return descs
     
@@ -147,20 +149,9 @@ class Recognizer:
         return negative_bags
 
 
-    def __train(self, categories_bags):
+    def train(self, categories_bags):
         self.__alert("training...")
         self.svms = []
-        # categories_bags
-        #   list of tuples of:
-        #     0 - category
-        #     1 - list of images:
-        #         list of tuples of:
-        #            0 - word
-        #                array of ints for word feature
-        #            1 - ratio
-        start_time = time.time()
-        elapsed = time.time() - start_time 
-        self.__alert("creating bags for all training images took " + str(elapsed) + " seconds")
         for category, positive_bags in categories_bags:
             self.__alert("building positive bags for " + category)
             positive_bags2 = []
@@ -173,6 +164,9 @@ class Recognizer:
             self.__alert("building training matrices for " + category)
             train_matrix, label_matrix = self.__build_training_matrices(positive_bags, negative_bags)
 
+# Here I train my SVM for classification of each category.
+# Each SVM is trained on data within the category and
+# data outside the category
             self.__alert("training " + category + " svm...")
             svm_model = svm.SVC(probability=True)
             svm_model.fit(train_matrix, label_matrix)
@@ -183,6 +177,10 @@ class Recognizer:
         if self.verbose:
             print msg
 
+# This method performs vector quantization. I am finding SIFT
+# descriptors in the image and then finding which words those
+# descriptors come from. Then I count each of the words and
+# build a histogram from them.
     def __build_bag_of_words(self, image):
         kp, desc = self.sift.detectAndCompute(image, None)
         words = self.__find_words_in_vocab(desc)
@@ -206,7 +204,11 @@ class Recognizer:
         best_proximity = 0
         stats = []
         for category, svm_model in self.svms:
-#             a = svm_model.predict(input)
+            # This code right here uses my SVM to determine which
+            # category the input image belongs to.
+            # I test the probability of belonging to each category
+            # given by each SVM and then return the category for the
+            # SVM which gives the highest probability.
             svm_probability = svm_model.predict_proba(input)[0][1]
             if svm_probability > best_proximity:
                 best_proximity = svm_probability
@@ -217,20 +219,6 @@ class Recognizer:
             return best_category, stats
         else:
             return best_category
-
-#     def recognize_nn(self, image, output_stats=False):
-#         bag_of_words = self.__build_bag_of_words(image)
-#         bag_of_words = map(lambda pb: pb[1], bag_of_words)
-#         categories = self.category_bags[self.category_bags_kd_tree.query(bag_of_words,3)[1]]
-#         
-#         best_category = categories[0]
-#         stats = [(best_category, 1)]
-#         if output_stats:
-#             return best_category, stats
-#         else:
-#             return best_category
-
-
 
 def load_images(path):
     image_paths = glob.glob(path)
@@ -250,40 +238,61 @@ def load_categories(category_names):
         categories.append( (name, imgs ) )
     return categories
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+# This method runs a test using our recognizer to determine 
+# whether an image belongs to the correct_category.
+# Probabilities for each category are displayed
+def test_image(image, correct_category):
+    is_correct = False
+    output_img = np.copy(image)
+    recognized_category, stats = recognizer.recognize(output_img, output_stats=True)
+
+    color = (0,0,255)
+    if recognized_category == correct_category:
+        is_correct = True
+        color = (0, 255, 0)
+
+    confidence = max(map(lambda s: s[1], stats))
+    confidence = '{:.1%}'.format(confidence)
+
+    cv2.putText(output_img, recognized_category, (5,30), cv2.FONT_HERSHEY_PLAIN, 1.5, color, 3)
+    cv2.putText(output_img, str(confidence), (5,60), cv2.FONT_HERSHEY_PLAIN, 1.5, color, 3)
+    output_img = cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB)
+    plot2d(output_img, confidence)
+
+    for stat in stats:
+        color = bcolors.ENDC
+        if stat[0] == recognized_category:
+            if recognized_category == correct_category:
+                color = bcolors.OKGREEN
+            else:
+                color = bcolors.FAIL
+        print color,'{:<15}{:>6.1%}'.format(stat[0], stat[1])
+    return is_correct, output_img
+    
+# Runs test_image for a bunch of sample data from all of the
+# categories that are specified.
 def test_recognition(categories, test_samples_per_category):
-    OUTPUT = "Recognition"
-    cv2.namedWindow(OUTPUT)
     correct_matches = 0
     total_tests = len(categories) * test_samples_per_category
     results_imgs = []
     for category, imgs in categories:
-        print "\n\n\n-------------------CATEGORY", category, "-------------------"
+        print bcolors.BOLD, '{:-^40}'.format("Category " + category), bcolors.ENDC
         for i in range(test_samples_per_category):
-            output_img = np.copy(imgs[len(imgs) - i - 1])
-            recognized_category, stats = recognizer.recognize(output_img, output_stats=True)
-
-
-            color = (0,0,255)
-            if recognized_category == category:
-                correct_matches += 1
-                color = (0, 255, 0)
-
-            confidence = max(map(lambda s: s[1], stats))
-            confidence = '{:.1%}'.format(confidence)
-
-            cv2.putText(output_img, recognized_category, (5,30), cv2.FONT_HERSHEY_PLAIN, 1.5, color, 3)
-            cv2.putText(output_img, str(confidence), (5,60), cv2.FONT_HERSHEY_PLAIN, 1.5, color, 3)
+            is_correct, output_img = test_image(imgs[len(imgs) - i - 1], category)
             results_imgs.append(output_img)
-            cv2.imshow(OUTPUT, output_img)
-            cv2.waitKey(500)
-
-            print "best match: ", recognized_category
-            for stat in stats:
-                print "       svm: ", stat[0], "\t", '{:.1%}'.format(stat[1])
-                print 
-
-    cv2.destroyWindow(OUTPUT)
-
+            if is_correct:
+                correct_matches += 1
+                
     print "\n\n\n\n"
     print "accuracy: ", correct_matches, " of ", total_tests
     percent_accuracy = correct_matches / float(total_tests)
@@ -291,39 +300,26 @@ def test_recognition(categories, test_samples_per_category):
     return results_imgs
 
 
-def save_results(imgs):
-    output_dir = "./output"
-    if os.path.exists(output_dir):
-        for the_file in os.listdir(output_dir):
-            file_path = os.path.join(output_dir, the_file)
-            try:
-                if os.path.isfile(file_path):
-                    os.unlink(file_path)
-            except Exception as e:
-                print(e)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    for i, img in enumerate(imgs):
-        filename = os.path.join(output_dir, str(i) + ".jpg")
-        cv2.imwrite(filename, img)
-        
-
 category_names = [
-         "pigeon",    "menorah",      "sunflower",       "strawberry","snoopy",
-         "brain",       "camera",       "soccer_ball",     "panda",     "revolver",
-         "yin_yang",     "stop_sign",    "pyramid",      "nautilus",     "scissors",
-         "schooner",     "umbrella",    "stapler",          "inline_skate", "dollar_bill"]
+    "apricot_tree", "popcorn", "revolver"]
+#          "metronome",   "menorah",      "sunflower",    "strawberry",   "snoopy",
+#          "brain",       "buddha",       "soccer_ball",  "grand_piano",  "revolver",
+#          "yin_yang",    "stop_sign",    "pyramid",      "nautilus",     "scissors",
+#          "schooner",    "ceiling_fan",   "laptop",       "inline_skate", "dollar_bill"]
+
 print "loading image files..."
 categories = load_categories(category_names)
 
 recognizer = Recognizer(
         categories_images=categories,
         samples_per_image_count=80,
-        vocab_size=100, max_images_per_category=30,
+        vocab_size=125, max_images_per_category=15,
         verbose=True)
 
 
-results_imgs = test_recognition(categories, 6)
+recognizer.train(recognizer.categories_bags)
 
-save_results(results_imgs)
 
+
+TEST_IMAGES_PER_CATEGORY = 6
+results_imgs = test_recognition(categories, TEST_IMAGES_PER_CATEGORY)
