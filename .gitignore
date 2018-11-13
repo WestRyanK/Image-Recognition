@@ -1,3 +1,6 @@
 train/*
+!train/apricot_tree
+!train/popcorn
+!train/revolver
 .vscode/
 .ipynb_checkpoints/
