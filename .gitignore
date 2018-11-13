@@ -1,0 +1,4 @@
+train/*
+.vscode/
+.ipynb_checkpoints/
+lab_06.ipynb
