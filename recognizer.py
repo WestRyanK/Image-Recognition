@@ -8,9 +8,9 @@ from sklearn import svm
 from sklearn.cluster import KMeans
 from collections import Counter
 
-%matplotlib inline
-np.set_printoptions(suppress=True)
-matplotlib.rcParams['figure.figsize'] = (4,4)
+#%matplotlib inline
+#np.set_printoptions(suppress=True)
+#matplotlib.rcParams['figure.figsize'] = (4,4)
 
 def plot2d(image, title="", max=None, min=0, cmap="gray"):
     plt.title(title)
